@@ -51,7 +51,7 @@ Since the owner is derived externally, `transferOwnership()` and `renounceOwners
 - **`transferOwnership(address)`**: MUST revert. Ownership is transferred by transferring the referenced token or changing ownership on the source contract.
 - **`renounceOwnership()`**: MUST revert.
 
-If the `LSP34OwnershipSource` data key is not set, both functions SHOULD behave as standard [ERC173].
+If the `LSP34OwnershipSource` data key is not set, both functions MUST behave as standard [ERC173] (i.e., call the inherited `transferOwnership` / `renounceOwnership`).
 
 ### ERC725Y Data Keys
 
@@ -103,11 +103,15 @@ _Recommendations:_
 
 #### Circular Ownership
 
-Implementations MUST guard against circular ownership references (contract A derives owner from B, B derives from A). Implementations SHOULD set a maximum resolution depth of 1 hop and revert if the resolved owner is `address(0)` or the call fails.
+Implementations MUST guard against circular ownership references (contract A derives owner from B, B derives from A). Implementations SHOULD set a maximum resolution depth of **1 hop** — meaning the LSP34 contract makes exactly one external call (`tokenOwnerOf` or `owner()`) and treats the returned address as the final owner, regardless of whether that address itself uses LSP34 internally. If the resolved owner is `address(0)` or the call fails, implementations SHOULD fall back to the local owner variable.
+
+#### `bytes32(0)` TokenId Reservation
+
+`bytes32(0)` is reserved as the sentinel value meaning "call `owner()` instead of `tokenOwnerOf()`." Implementations using sequential `uint256` tokenIds (encoded as `bytes32`) SHOULD start from `1`, not `0`, to avoid ambiguity.
 
 #### Source Contract Availability
 
-If `sourceContract` is destroyed, the `owner()` call will return `address(0)` or revert. Implementations SHOULD handle this gracefully, falling back to the local owner variable.
+If `sourceContract` is destroyed or becomes unreachable, the `owner()` call will revert. Implementations SHOULD handle this gracefully by catching the revert and falling back to the local owner variable (`super.owner()`). Caching the source contract address as an `immutable` variable (set in the constructor) is RECOMMENDED to avoid depending on ERC725Y storage reads for the source address.
 
 #### Access Control
 

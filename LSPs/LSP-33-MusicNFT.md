@@ -154,6 +154,16 @@ _Requirements:_
 
 - MUST only be called by the current owner of the contract.
 
+#### Event Behavior
+
+When a metadata write is forwarded to a linked LSP7, the LSP8 does **not** emit `TokenIdDataChanged` for that operation — the data is not stored on the LSP8. Instead, the LSP7 emits its own `DataChanged` event.
+
+Indexers and frontends SHOULD:
+
+1. Read `LSP33OwnableTrackToken` for each tokenId to discover linked LSP7 contracts.
+2. Subscribe to `DataChanged` events on linked LSP7 contracts for metadata updates.
+3. Treat the LSP8 as a router — only `TokenIdDataChanged` events for locally stored data (non-metadata keys, unlinked tokenIds) are emitted by the LSP8.
+
 ### ERC725Y Data Keys
 
 #### SupportedStandards:LSP33MusicNFT
@@ -220,6 +230,7 @@ The LSP7 contract MUST:
 
 - Implement [LSP34] with `LSP34OwnershipSource` pointing to `(LSP8Address, tokenId)`.
 - Set [`LSP8ReferenceContract`][LSP8Ref] to `(LSP8Address, tokenId)`.
+- Cache the parent LSP8 collection address as an `immutable` variable (set in the constructor). This avoids reading from ERC725Y storage on every `owner()` call and ensures the parent reference cannot be changed after deployment.
 - Use `LSP4Metadata` and `LSP33Metadata` for track metadata.
 - Resolve `owner()` via LSP34.
 - Restrict minting to the resolved owner.
@@ -237,9 +248,18 @@ The LSP7 MUST accept `setData` and `setDataBatch` calls from its parent LSP8 col
 When `setData` or `setDataBatch` is called, the LSP7 MUST allow the call if either:
 
 1. `msg.sender` is the resolved `owner()` (via LSP34), OR
-2. `msg.sender` matches the LSP8 address stored in [`LSP8ReferenceContract`][LSP8Ref].
+2. `msg.sender` matches the cached parent LSP8 collection address (set immutably in the constructor).
 
 This is safe because the LSP8 verifies `onlyOwner` before forwarding, and both owners resolve to the same address (the artist).
+
+#### Address Encoding
+
+The `LSP33OwnableTrackToken` value (the linked LSP7 address) MAY be encoded as either:
+
+- **20 bytes** (`abi.encodePacked(address)`) — compact form.
+- **32 bytes** (`abi.encode(address)`) — left-padded form.
+
+Implementations MUST handle both formats when extracting the address.
 
 #### Bidirectional Link Verification
 
