@@ -2,7 +2,7 @@
 lip: 33
 title: Music NFT
 author: Fabian Vogelsteller <fabian@universaleverything.io>, Thomas Beard <thomas@universaleverything.io>
-discussions-to: https://discord.gg/E2rJPP4
+discussions-to: https://t.me/+PjX_Awnpjh8xYWE0
 status: Draft
 type: LSP
 created: 2025-03-20
