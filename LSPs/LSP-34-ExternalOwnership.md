@@ -129,7 +129,7 @@ Proxy-based approaches require compatible storage layouts. LSP34 is a pure read 
 
 ## Implementation
 
-An implementation can be found in [TODO: link to reference implementation].
+An implementation can be found in [lukso-network/lsp-smart-contracts#1088](https://github.com/lukso-network/lsp-smart-contracts/pull/1088).
 
 ERC725Y JSON Schema `LSP34ExternalOwnership`:
 

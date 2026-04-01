@@ -556,7 +556,7 @@ Not every track needs ownable editions. A track without `LSP33OwnableTrackToken`
 
 ## Implementation
 
-An implementation can be found in [TODO: link to reference implementation].
+An implementation can be found in [lukso-network/lsp-smart-contracts#1088](https://github.com/lukso-network/lsp-smart-contracts/pull/1088).
 
 ERC725Y JSON Schema `LSP33MusicNFT`:
 
