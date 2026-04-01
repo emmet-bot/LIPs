@@ -1,7 +1,7 @@
 ---
 lip: 33
 title: Music NFT
-author: Fabian Vogelsteller <fabian@lukso.network>
+author: Fabian Vogelsteller <fabian@universaleverything.io>, Thomas Beard <thomas@universaleverything.io>
 discussions-to: https://discord.gg/E2rJPP4
 status: Draft
 type: LSP
