@@ -93,6 +93,7 @@ Artist (Universal Profile)
   │          Requires: caller is contract owner
   │
   ├──► LSP8.setDataForTokenId(tokenId, dataKey, dataValue)
+  │      ├── Requires: caller is tokenOwnerOf(tokenId)
   │      ├── LSP33OwnableTrackToken set for tokenId?
   │      │
   │      │   NO ──► Write locally to LSP8 tokenId storage
@@ -106,8 +107,6 @@ Artist (Universal Profile)
   │      │                        the LSP8 in my LSP8ReferenceContract?
   │      │                        YES ──► Write to LSP7 storage ✓
   │      │                        NO  ──► Revert
-  │      │
-  │      └── Requires: caller is contract owner
   │
   ├──► LSP7.setData(key, value)
   │      └── Direct track metadata update (also valid)
@@ -152,7 +151,7 @@ When `setDataForTokenId(tokenId, dataKey, dataValue)` is called and `LSP33Ownabl
 
 _Requirements:_
 
-- MUST only be called by the current owner of the contract.
+- MUST only be callable by the current owner of the specific `tokenId` (as returned by `tokenOwnerOf(tokenId)`), **not** the contract-level `owner()`. This is consistent with LSP7's access model, where `owner()` resolves to the same `tokenOwnerOf` result via LSP34. When a track is transferred, the new token owner automatically gains control over that track's metadata.
 
 #### Event Behavior
 
@@ -199,7 +198,7 @@ Per-tokenId data key (via `setDataForTokenId`) pointing to the [LSP7] contract r
 
 _Requirements:_
 
-- MUST only be settable by the contract owner.
+- MUST only be settable by the `tokenId` owner (via `tokenOwnerOf`).
 - Before setting, the implementation SHOULD verify the [bidirectional link](#bidirectional-link-verification).
 - Once set, it is RECOMMENDED not to change this value, to preserve ownership integrity for existing LSP7 token holders.
 
