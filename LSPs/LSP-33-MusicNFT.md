@@ -22,7 +22,7 @@ This standard defines how to represent music as digital assets by composing exis
 - Optionally, a track can have an associated **[LSP7] contract** for **ownable units** (e.g., collectible editions), indicated by the `LSP33OwnableTrackToken` data key.
 - When an LSP7 is linked, the LSP8 acts as a **transparent router**: reads proxy to the LSP7, writes forward to the LSP7's `setData`.
 - The LSP7 uses [LSP34] to derive its owner from the LSP8 `tokenOwnerOf`, so the artist retains control over minting and metadata.
-- Extended music metadata (contributors, identifiers, copyright, lyrics, DDEX, stems) lives in `LSP33Metadata` — a separate section in the same JSON file as `LSP4Metadata`.
+- Extended music metadata (contributors, identifiers, copyright, lyrics, DDEX, stems) lives in `LSP33Metadata` — a separate data key with its own JSON file.
 
 Tracks can exist as metadata-only entries (proving creation) or as fully ownable digital assets, all within a single composable framework.
 
@@ -253,14 +253,14 @@ _Requirements:_
 }
 ```
 
-References the extended music metadata JSON file. This file is stored alongside `LSP4Metadata` in the same JSON document, under a separate top-level `LSP33Metadata` property.
+References the extended music metadata JSON file. This is a separate file from `LSP4Metadata`, stored under its own data key.
 
 Can be set:
 - On the **LSP8 contract level** for release/album metadata.
 - Per **tokenId** via `setDataForTokenId` for track-level metadata.
 - On the **LSP7 contract level** for ownable track token metadata.
 
-Both `LSP4Metadata` and `LSP33Metadata` SHOULD point to the same JSON file — one upload, one download.
+> **Note:** `LSP4Metadata` and `LSP33Metadata` MAY point to the same JSON file (with both as top-level properties) to save storage and fetches, but this is not required.
 
 ### LSP7 Contract (Ownable Track Units)
 
@@ -305,12 +305,14 @@ When setting `LSP33OwnableTrackToken` for a tokenId, the LSP8 SHOULD verify that
 
 ### Metadata
 
-This standard uses [LSP4] for display metadata and extends it with `LSP33Metadata` for structured music data. Both live in the **same JSON file** as separate top-level properties.
+This standard uses [LSP4] for display metadata and extends it with `LSP33Metadata` for structured music data. Each has its own data key and is typically stored as a **separate JSON file**.
 
 - **`LSP4Metadata`**: Human-readable — name, description, artwork, links, audio assets, attributes. Defined by [LSP4].
 - **`LSP33Metadata`**: Structured music data — contributors, identifiers, copyright, lyrics, preview, stems, DDEX. Defined by this standard.
 
 The `LSP4Metadata` JSON MUST include the top-level `category` field set to `"Music"`.
+
+> **Note:** Both files MAY be combined into a single JSON document with `LSP4Metadata` and `LSP33Metadata` as top-level properties. In that case, both data keys reference the same URI.
 
 #### Release / Album Metadata
 
@@ -524,16 +526,15 @@ Reference to a [DDEX ERN](https://ddex.net/standards/electronic-release-notifica
 | `version` | `string` | | ERN version |
 | `verification` | `object` | | Same as LSP4 VerifiableURI |
 
-### Full Metadata File Examples
+### Full Metadata Examples
 
-Both `LSP4Metadata` and `LSP33Metadata` data keys point to the **same JSON file**. This means one upload and one download for all metadata. The JSON file has two top-level properties:
+`LSP4Metadata` and `LSP33Metadata` have **separate data keys** and are typically stored as **separate JSON files**. Each data key points to its own [VerifiableURI].
 
-- `LSP4Metadata` — display metadata (name, description, images, attributes). Defined by [LSP4].
-- `LSP33Metadata` — structured music data (contributors, identifiers, copyright, etc.). Defined by this standard.
+> **Note:** The two files MAY be combined into a single JSON file with both `LSP4Metadata` and `LSP33Metadata` as top-level properties. In that case, both data keys would reference the same URI. This saves one upload and one fetch, but is not required.
 
-#### Release / Album Metadata File
+#### Release / Album — LSP4Metadata File
 
-This JSON file is referenced by the LSP8 contract's `LSP4Metadata` and `LSP33Metadata` data keys:
+Referenced by the LSP8 contract's `LSP4Metadata` data key:
 
 ```json
 {
@@ -580,7 +581,16 @@ This JSON file is referenced by the LSP8 contract's `LSP4Metadata` and `LSP33Met
       { "key": "Language", "value": "eng", "type": "string" }
     ],
     "category": "Music"
-  },
+  }
+}
+```
+
+#### Release / Album — LSP33Metadata File
+
+Referenced by the LSP8 contract's `LSP33Metadata` data key:
+
+```json
+{
   "LSP33Metadata": {
     "contributors": [
       { "name": "ledfut", "address": "0x1234...abcd", "roles": ["MainArtist", "Producer"] },
@@ -603,9 +613,9 @@ This JSON file is referenced by the LSP8 contract's `LSP4Metadata` and `LSP33Met
 }
 ```
 
-#### Track Metadata File
+#### Track — LSP4Metadata File
 
-This JSON file is referenced per-tokenId (via `setDataForTokenId`) or on the LSP7 contract. Contains the same two-section structure but with track-specific data:
+Referenced per-tokenId (via `setDataForTokenId`) or on the LSP7 contract's `LSP4Metadata` data key:
 
 ```json
 {
@@ -649,7 +659,16 @@ This JSON file is referenced per-tokenId (via `setDataForTokenId`) or on the LSP
       { "key": "Explicit Content", "value": "NotExplicit", "type": "string" }
     ],
     "category": "Music"
-  },
+  }
+}
+```
+
+#### Track — LSP33Metadata File
+
+Referenced per-tokenId (via `setDataForTokenId`) or on the LSP7 contract's `LSP33Metadata` data key:
+
+```json
+{
   "LSP33Metadata": {
     "contributors": [
       { "name": "ledfut", "address": "0x1234...abcd", "roles": ["MainArtist", "Producer", "Composer"] },
@@ -743,9 +762,9 @@ This JSON file is referenced per-tokenId (via `setDataForTokenId`) or on the LSP
 
 This standard composes existing LSP primitives rather than defining new token contracts. Existing tooling, indexers, and interfaces work out of the box.
 
-### Two-Section Metadata
+### Separate Metadata Files
 
-Separating `LSP4Metadata` (display) from `LSP33Metadata` (structured music data) provides backwards compatibility (any LSP4-aware interface works), a single file for all metadata, clean separation of concerns, and independent extensibility.
+Using separate data keys and files for `LSP4Metadata` (display) and `LSP33Metadata` (structured music data) provides backwards compatibility (any LSP4-aware interface works), clean separation of concerns, independent extensibility, and the option to combine both into a single file when desired.
 
 ### Transparent Data Routing
 
