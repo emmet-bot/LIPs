@@ -26,6 +26,40 @@ This standard defines how to represent music as digital assets by composing exis
 
 Tracks can exist as metadata-only entries (proving creation) or as fully ownable digital assets, all within a single composable framework.
 
+### Ownership Model
+
+This standard distinguishes between two layers of ownership:
+
+| | **Artist Ownership** | **Collector Ownership** |
+|---|---|---|
+| **What** | LSP8 `tokenId` (the track itself) | LSP7 units (copies/shares of a track) |
+| **Who** | The artist or rights holder | Fans, collectors, anyone |
+| **Controls** | Metadata, minting new units, linking LSP7 | Transferring/trading their units |
+| **How** | `tokenOwnerOf(tokenId)` on the LSP8 | `balanceOf(address)` on the LSP7 |
+
+**The LSP8 tokenId always stays with the artist.** It represents authorship and creative control — not a collectible to be traded. The artist mints a tokenId for each track, sets its metadata, and optionally links an LSP7 to make it collectible.
+
+**Collectors never touch the LSP8 directly.** They interact only with the LSP7 — buying, holding, and trading fungible units of a track. Holding LSP7 units does not grant any control over the track's metadata, minting, or identity.
+
+```
+  Artist (Universal Profile)
+    │
+    ├── Owns LSP8 tokenId 1 ("Track A")
+    │     ├── Can set/update metadata
+    │     ├── Can link an LSP7 for collectible editions
+    │     └── Can mint LSP7 units to sell to fans
+    │
+    └── Owns LSP8 tokenId 2 ("Track B")
+          └── Metadata-only (no LSP7, no collectibles)
+
+  Collector (Fan)
+    │
+    └── Holds 5 LSP7 units of "Track A"
+          ├── Can transfer or trade units
+          ├── Cannot change track metadata
+          └── Cannot mint new units
+```
+
 ## Motivation
 
 Music on the blockchain lacks a standardized way to represent relationships between releases, tracks, and collectibles. Artists need:
@@ -33,7 +67,7 @@ Music on the blockchain lacks a standardized way to represent relationships betw
 1. **Provenance** — prove creation at a point in time, even without selling.
 2. **Composability** — use existing standards (LSP7, LSP8, LSP4) rather than new token contracts.
 3. **Flexibility** — some tracks are metadata-only, others have ownable editions.
-4. **Ownership Continuity** — when a track changes hands, the linked LSP7 automatically respects the new owner.
+4. **Artist Control** — the artist always controls their tracks' metadata and minting, regardless of who holds collectible units.
 5. **Unified Interface** — manage all track data through the LSP8 collection contract.
 6. **Industry Compatibility** — bridge on-chain metadata with DDEX, ISRC, ISWC, GRid for DSP interoperability.
 
@@ -42,33 +76,38 @@ Music on the blockchain lacks a standardized way to represent relationships betw
 ### Overview
 
 ```
-┌─────────────────────────────────────────────────┐
-│  LSP8 Collection (Release / Album)              │
-│  LSP4Metadata = release display metadata        │
-│  LSP33Metadata = release music metadata         │
-│  LSP4TokenType = 2 (Collection)                 │
-│                                                 │
-│  tokenId 1 ─── Track 1                         │
-│    ├── LSP4Metadata (per-track display)         │
-│    ├── LSP33Metadata (per-track music data)     │
-│    └── LSP33OwnableTrackToken ──► LSP7 Contract │
-│         ▲      read/write proxy        │        │
-│         └──────────────────────────────┘        │
-│                                                 │
-│  tokenId 2 ─── Track 2 (metadata only)         │
-│    ├── LSP4Metadata                             │
-│    └── LSP33Metadata                            │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  LSP8 Collection (Release / Album)                              │
+│  Owner: The Artist (Universal Profile)                          │
+│  LSP4Metadata = release display metadata                        │
+│  LSP33Metadata = release music metadata                         │
+│  LSP4TokenType = 2 (Collection)                                 │
+│                                                                  │
+│  tokenId 1 ─── Track 1 (owned by artist)                        │
+│    ├── LSP4Metadata (per-track display)                          │
+│    ├── LSP33Metadata (per-track music data)                      │
+│    └── LSP33OwnableTrackToken ──► LSP7 Contract                  │
+│         ▲      read/write proxy        │                         │
+│         └──────────────────────────────┘                         │
+│                                                                  │
+│  tokenId 2 ─── Track 2 (metadata only, owned by artist)         │
+│    ├── LSP4Metadata                                              │
+│    └── LSP33Metadata                                             │
+└──────────────────────────────────────────────────────────────────┘
 
-┌─────────────────────────────────────────────────┐
-│  LSP7 Ownable Token (single track)              │
-│  LSP8ReferenceContract ──► (LSP8, tokenId)      │
-│  LSP34OwnershipSource ──► (LSP8, tokenId)       │
-│  LSP4Metadata = track display metadata          │
-│  LSP33Metadata = track music metadata           │
-│  owner() resolved from LSP8 tokenOwnerOf        │
-│  setData() accepts owner OR parent LSP8         │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  LSP7 Ownable Token (single track)                              │
+│  Controlled by: Artist (via LSP34 → LSP8 tokenOwnerOf)          │
+│  Traded by: Collectors / fans (fungible units)                   │
+│  LSP8ReferenceContract ──► (LSP8, tokenId)                       │
+│  LSP34OwnershipSource ──► (LSP8, tokenId)                        │
+│  LSP4Metadata = track display metadata                           │
+│  LSP33Metadata = track music metadata                            │
+│  owner() = artist (resolved from LSP8 tokenOwnerOf)              │
+│  setData() = artist OR parent LSP8 (same person)                 │
+│  mint() = artist only                                            │
+│  balanceOf() = how many units each collector holds               │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ### LSP8 Contract (Release / Album)
@@ -485,26 +524,60 @@ Reference to a [DDEX ERN](https://ddex.net/standards/electronic-release-notifica
 | `version` | `string` | | ERN version |
 | `verification` | `object` | | Same as LSP4 VerifiableURI |
 
-### Full Metadata File Example
+### Full Metadata File Examples
 
-A single JSON file referenced by both `LSP4Metadata` and `LSP33Metadata` data keys:
+Both `LSP4Metadata` and `LSP33Metadata` data keys point to the **same JSON file**. This means one upload and one download for all metadata. The JSON file has two top-level properties:
+
+- `LSP4Metadata` — display metadata (name, description, images, attributes). Defined by [LSP4].
+- `LSP33Metadata` — structured music data (contributors, identifiers, copyright, etc.). Defined by this standard.
+
+#### Release / Album Metadata File
+
+This JSON file is referenced by the LSP8 contract's `LSP4Metadata` and `LSP33Metadata` data keys:
 
 ```json
 {
   "LSP4Metadata": {
     "name": "ledfut - single 20031400",
-    "description": "Description for the single collection.",
-    "links": [],
-    "icon": [{ "width": 256, "height": 256, "url": "ipfs://QmIcon...", "verification": { "method": "keccak256(bytes)", "data": "0x..." } }],
-    "images": [[{ "url": "ipfs://QmCover...", "width": 1024, "height": 1024, "verification": { "method": "keccak256(bytes)", "data": "0x..." } }]],
+    "description": "A 2-track house single by ledfut, released on TMPS.",
+    "links": [
+      { "title": "Artist Website", "url": "https://ledfut.xyz" },
+      { "title": "Spotify", "url": "https://open.spotify.com/album/..." }
+    ],
+    "icon": [
+      {
+        "width": 256,
+        "height": 256,
+        "url": "ipfs://QmIcon256.../icon.png",
+        "verification": { "method": "keccak256(bytes)", "data": "0xabcd..." }
+      }
+    ],
+    "images": [
+      [
+        {
+          "width": 1024,
+          "height": 1024,
+          "url": "ipfs://QmCover1024.../cover.jpg",
+          "verification": { "method": "keccak256(bytes)", "data": "0x1234..." }
+        },
+        {
+          "width": 512,
+          "height": 512,
+          "url": "ipfs://QmCover512.../cover.jpg",
+          "verification": { "method": "keccak256(bytes)", "data": "0x5678..." }
+        }
+      ]
+    ],
     "assets": [],
     "attributes": [
       { "key": "Artist", "value": "ledfut", "type": "string" },
       { "key": "Release Type", "value": "Single", "type": "string" },
       { "key": "Release Date", "value": "2025-11-06", "type": "string" },
       { "key": "Primary Genre", "value": "House", "type": "string" },
+      { "key": "Secondary Genre", "value": "Techno", "type": "string" },
       { "key": "Track Count", "value": "2", "type": "string" },
-      { "key": "Label", "value": "tmps", "type": "string" }
+      { "key": "Label", "value": "TMPS", "type": "string" },
+      { "key": "Language", "value": "eng", "type": "string" }
     ],
     "category": "Music"
   },
@@ -513,10 +586,123 @@ A single JSON file referenced by both `LSP4Metadata` and `LSP33Metadata` data ke
       { "name": "ledfut", "address": "0x1234...abcd", "roles": ["MainArtist", "Producer"] },
       { "name": "Studio Wizard", "address": "0xabcd...1234", "roles": ["Mastering Engineer"] }
     ],
-    "identifiers": { "upc": "012345678905", "catalogueNumber": "TMPS005" },
+    "identifiers": {
+      "upc": "012345678905",
+      "catalogueNumber": "TMPS005"
+    },
     "copyright": {
-      "pLine": { "year": 2026, "text": "TMPS" },
-      "cLine": { "year": 2026, "text": "TMPS" }
+      "pLine": { "year": 2025, "text": "TMPS" },
+      "cLine": { "year": 2025, "text": "TMPS" }
+    },
+    "ddex": {
+      "url": "ipfs://QmDdex.../release-ern.xml",
+      "version": "4.3.2",
+      "verification": { "method": "keccak256(bytes)", "data": "0x9abc..." }
+    }
+  }
+}
+```
+
+#### Track Metadata File
+
+This JSON file is referenced per-tokenId (via `setDataForTokenId`) or on the LSP7 contract. Contains the same two-section structure but with track-specific data:
+
+```json
+{
+  "LSP4Metadata": {
+    "name": "20031400",
+    "description": "Track 1 from 'ledfut - single 20031400'. A driving house cut.",
+    "links": [],
+    "icon": [
+      {
+        "width": 256,
+        "height": 256,
+        "url": "ipfs://QmTrackIcon.../icon.png",
+        "verification": { "method": "keccak256(bytes)", "data": "0xdef0..." }
+      }
+    ],
+    "images": [
+      [
+        {
+          "width": 1024,
+          "height": 1024,
+          "url": "ipfs://QmTrackCover.../cover.jpg",
+          "verification": { "method": "keccak256(bytes)", "data": "0x2345..." }
+        }
+      ]
+    ],
+    "assets": [
+      {
+        "url": "ipfs://QmAudio.../20031400.flac",
+        "fileType": "audio/flac",
+        "verification": { "method": "keccak256(bytes)", "data": "0x6789..." }
+      }
+    ],
+    "attributes": [
+      { "key": "Artist", "value": "ledfut", "type": "string" },
+      { "key": "Track Number", "value": "1", "type": "string" },
+      { "key": "Primary Genre", "value": "House", "type": "string" },
+      { "key": "Release Date", "value": "2025-11-06", "type": "string" },
+      { "key": "Duration", "value": "5:22", "type": "string" },
+      { "key": "BPM", "value": "128", "type": "string" },
+      { "key": "Key", "value": "Am", "type": "string" },
+      { "key": "Explicit Content", "value": "NotExplicit", "type": "string" }
+    ],
+    "category": "Music"
+  },
+  "LSP33Metadata": {
+    "contributors": [
+      { "name": "ledfut", "address": "0x1234...abcd", "roles": ["MainArtist", "Producer", "Composer"] },
+      { "name": "ampy", "address": "0x5678...efgh", "roles": ["Lyricist"] },
+      { "name": "Studio Wizard", "address": "0xabcd...1234", "roles": ["MixingEngineer", "MasteringEngineer"] }
+    ],
+    "identifiers": {
+      "isrc": "USABC2512345",
+      "iswc": "T-123.456.789-0",
+      "catalogueNumber": "TMPS005-01"
+    },
+    "copyright": {
+      "pLine": { "year": 2025, "text": "TMPS" },
+      "cLine": { "year": 2025, "text": "TMPS" }
+    },
+    "lyrics": {
+      "text": "Verse 1:\nFeel the bass drop low tonight\nMoving through the neon light\n\nChorus:\nWe don't stop, we don't stop...",
+      "language": "en",
+      "synced": false
+    },
+    "preview": {
+      "startMs": 45000,
+      "durationMs": 30000
+    },
+    "stems": [
+      {
+        "name": "Drums",
+        "url": "ipfs://QmStems.../drums.wav",
+        "fileType": "audio/wav",
+        "verification": { "method": "keccak256(bytes)", "data": "0xaaaa..." }
+      },
+      {
+        "name": "Bass",
+        "url": "ipfs://QmStems.../bass.wav",
+        "fileType": "audio/wav",
+        "verification": { "method": "keccak256(bytes)", "data": "0xbbbb..." }
+      },
+      {
+        "name": "Vocals",
+        "url": "ipfs://QmStems.../vocals.wav",
+        "fileType": "audio/wav",
+        "verification": { "method": "keccak256(bytes)", "data": "0xcccc..." }
+      },
+      {
+        "name": "Synths",
+        "url": "ipfs://QmStems.../synths.wav",
+        "fileType": "audio/wav",
+        "verification": { "method": "keccak256(bytes)", "data": "0xdddd..." }
+      }
+    ],
+    "ddex": {
+      "url": "ipfs://QmDdex.../track1-ern.xml",
+      "version": "4.3.2"
     }
   }
 }
@@ -567,7 +753,16 @@ Making the LSP8 a transparent router for linked LSP7s gives artists a unified in
 
 ### Parent Collection Authorization
 
-The LSP7 trusting its parent LSP8 for `setData` calls is safe because the LSP8 verifies `onlyOwner` before forwarding, both resolve to the same owner via LSP34, and the LSP7 only trusts the specific LSP8 stored in its `LSP8ReferenceContract`.
+The LSP7 trusting its parent LSP8 for `setData` calls is safe because the LSP8 verifies that the caller is the `tokenOwnerOf(tokenId)` before forwarding, both resolve to the same owner (the artist) via LSP34, and the LSP7 only trusts the specific LSP8 set immutably in its constructor.
+
+### Artist vs Collector Ownership
+
+This standard separates two distinct ownership layers:
+
+- **Artist ownership** (LSP8 `tokenOwnerOf`): The artist holds the LSP8 tokenId. This grants control over the track — setting metadata, linking an LSP7, and minting collectible units. The LSP8 tokenId is **not** a tradeable collectible; it represents authorship and creative rights.
+- **Collector ownership** (LSP7 `balanceOf`): Fans and collectors hold fungible LSP7 units. These represent ownership of copies or shares of a track. Holding units does **not** grant any control over metadata or minting — only the ability to transfer or trade the units themselves.
+
+This separation ensures that the artist always controls their work, regardless of how many collectible units are in circulation or who holds them.
 
 ### Metadata-Only Tracks
 
