@@ -11,204 +11,131 @@ requires: ERC165, ERC725Y, LSP2, LSP4, LSP7, LSP8, LSP34
 
 ## Simple Summary
 
-A composable standard for representing music as digital assets on LUKSO, with two equally valid paths: a **standalone [LSP7]** for a single ownable track, or an **[LSP8] collection** where each `tokenId` is a track (optionally linked to an LSP7 for collectible units).
+A composable standard for music on LUKSO. Two building blocks — an [LSP8] release and an [LSP7] track — that plug together in any order. Start with just a track, just a release, or both. Link them whenever you want.
 
 ## Abstract
 
-LSP33 defines how music — tracks and releases — is represented on-chain by composing existing LUKSO primitives ([LSP4], [LSP7], [LSP8], [LSP34]) rather than introducing new token contracts.
+LSP33 represents music as digital assets by composing existing LUKSO primitives ([LSP4], [LSP7], [LSP8], [LSP34]) instead of defining new token contracts. It has two building blocks:
 
-It supports two deployment paths:
+- An **[LSP8] collection** represents a release or album. Each `tokenId` is a track. Tracks can be metadata-only.
+- An **[LSP7] token** represents ownable units (collectible editions) of a single track.
 
-1. **Standalone LSP7 track.** A single LSP7 contract represents one track. Fans hold fungible units. There is no parent collection.
-2. **LSP8 collection.** An LSP8 represents a release/album. Each `tokenId` is a track. A track tokenId can be metadata-only, or linked to its own LSP7 for collectible units via the `LSP33OwnableTrackToken` data key.
+The two can be used independently or linked. Linking is done with a single data key, `LSP33OwnableTrackToken`, that points from an LSP8 tokenId to an LSP7. Once linked:
 
-In both paths:
+- The LSP8 acts as a **transparent router** for track metadata — reads proxy to the LSP7, writes forward to it.
+- The LSP7 uses [LSP34] to derive its `owner()` from `LSP8.tokenOwnerOf(tokenId)`, so the artist controls both from a single identity.
 
-- Display metadata lives in `LSP4Metadata` (with `category: "Music"`).
-- Extended music metadata (contributors, identifiers, copyright, lyrics, preview, stems, DDEX) lives in `LSP33Metadata` — a separate data key with its own JSON file.
-- The **artist** always controls metadata and minting. Collectors only hold and trade LSP7 units.
+This makes four workflows all work out of the box — start with a release, start with a track, add the other later, or do both from day one.
 
-In the LSP8 collection path, linked LSP7s use [LSP34] to derive their owner from the LSP8 `tokenOwnerOf`, and the LSP8 acts as a **transparent router** for metadata reads and writes — giving the artist a single interface for everything.
-
-### Two Ownership Layers
+### Artist vs Collector Ownership
 
 LSP33 separates authorship from collectibility:
 
-| | **Artist Ownership** | **Collector Ownership** |
+| | **Artist** | **Collector** |
 |---|---|---|
-| **What** | LSP8 `tokenId` (Path 2) <br> or LSP7 contract `owner()` (Path 1) | LSP7 `balanceOf(address)` |
-| **Who** | The artist or rights holder | Fans, collectors |
-| **Controls** | Metadata, minting, linking | Transferring/trading units |
+| **What they hold** | LSP8 `tokenId` and/or LSP7 `owner()` | LSP7 units (`balanceOf`) |
+| **Can do** | Set metadata, mint, link LSP7 ↔ LSP8 | Transfer / trade units |
 | **Tradeable?** | No — represents authorship | Yes — fungible units |
 
-**Holding LSP7 units never grants control over metadata or minting.** That stays with the artist.
+Holding LSP7 units never grants control over metadata or minting. That always stays with the artist.
 
 ## Motivation
 
-Music on the blockchain lacks a standardized way to represent releases, tracks, and collectibles in one framework. Artists need:
-
-1. **Provenance** — prove creation at a point in time, even without selling.
-2. **Composability** — use existing LSP standards rather than new token contracts.
-3. **Flexibility** — a single track can be standalone, or part of a release. Tracks can be metadata-only or ownable.
-4. **Artist Control** — metadata and minting stay with the artist, regardless of who holds units.
-5. **Industry Compatibility** — bridge on-chain data with DDEX, ISRC, ISWC, GRid for DSP interoperability.
+Music on-chain needs a way to represent releases, tracks, and collectibles in one composable framework — with **provenance** (prove creation without selling), **artist control** (metadata + minting stay with the artist regardless of who holds units), **flexibility** (start anywhere, extend later), and **industry compatibility** (DDEX, ISRC, ISWC, GRid for DSP interoperability). LSP33 achieves this without introducing a new token type.
 
 ## Specification
 
-### Path 1 — Standalone LSP7 Track
+### Building Blocks
 
-A single track deployed as its own LSP7 contract. No parent collection.
+#### LSP8 Release Collection
 
-```
-┌────────────────────────────────────────────────┐
-│  LSP7 Track Contract                           │
-│  owner() = artist (standard ERC173)            │
-│  LSP4Metadata  = track display metadata        │
-│  LSP33Metadata = track music metadata          │
-│  LSP4TokenType = 1 (NFT/NDT)                   │
-│  decimals() = 0                                │
-│  SupportedStandards:LSP33MusicNFT              │
-│                                                │
-│  mint()     → only artist (owner)              │
-│  setData()  → only artist (owner)              │
-│  balanceOf(collector) → units owned            │
-└────────────────────────────────────────────────┘
-```
+An LSP8 contract represents a release or album. Each `tokenId` is a track.
 
-**Requirements:**
+- MUST set `LSP4TokenType` = `2` (Collection).
+- MUST set `SupportedStandards:LSP33MusicNFT`.
+- MUST set `LSP4Metadata` and `LSP33Metadata` on the contract for release-level data.
+- SHOULD set `LSP8TokenIdFormat` = `0` (uint256). TokenIds SHOULD be sequential starting from `1`.
+- Per-track metadata is set via `setDataForTokenId(tokenId, LSP4Metadata|LSP33Metadata, value)`.
+- If any tokenId has `LSP33OwnableTrackToken` set, the LSP8 MUST implement the [routing behavior](#data-routing) below.
 
-- MUST set `LSP4TokenType` to `1`.
-- SHOULD set `decimals()` to `0` (non-divisible).
+A tokenId with no `LSP33OwnableTrackToken` is a **metadata-only track** — useful for proving creation or cataloguing without issuing collectibles.
+
+#### LSP7 Ownable Track
+
+An LSP7 contract represents ownable units of a single track.
+
 - MUST set `SupportedStandards:LSP33MusicNFT`.
 - MUST set `LSP4Metadata` and `LSP33Metadata` on the contract.
-- MUST restrict `setData` and minting to the contract `owner()`.
-- MUST NOT set `LSP8ReferenceContract` or `LSP34OwnershipSource` (Path 1 has no parent).
+- SHOULD set `LSP4TokenType` = `1` (NFT/NDT) and `decimals()` = `0`.
+- MUST implement [LSP34]. When `LSP34OwnershipSource` is **unset**, `owner()` falls back to standard [ERC173] (the LSP7 is standalone). When **set** to `(lsp8Address, tokenId)`, `owner()` resolves to `LSP8.tokenOwnerOf(tokenId)` (the LSP7 is linked).
+- MUST restrict minting and `setData` to the resolved `owner()`, plus the [parent LSP8 authorization](#parent-authorization) below.
 
-Use this path when a track stands alone and has no album/release context.
+To make linking possible without requiring redeployment, an LSP7 intended to join a specific collection SHOULD cache the parent LSP8 address as an `immutable` variable in its constructor, and SHOULD set `LSP8ReferenceContract` = `(lsp8Address, tokenId)`. A purely standalone LSP7 (never intended to be linked) MAY omit both.
 
-### Path 2 — LSP8 Collection (Release / Album)
+### Linking (Plug and Play)
 
-An LSP8 contract represents a release. Each `tokenId` is a track. Tracks can be metadata-only, or linked to their own LSP7 for ownable units.
+Linking is a single write per side:
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  LSP8 Release Contract                                          │
-│  owner() = artist (standard ERC173)                             │
-│  LSP4Metadata  = release display metadata                       │
-│  LSP33Metadata = release music metadata                         │
-│  LSP4TokenType = 2 (Collection)                                 │
-│  LSP8TokenIdFormat = 0 (uint256)                                │
-│  SupportedStandards:LSP33MusicNFT                               │
-│                                                                  │
-│  tokenId 1 ─── Track 1 (metadata-only)                          │
-│    ├── LSP4Metadata  (per-tokenId)                               │
-│    └── LSP33Metadata (per-tokenId)                               │
-│                                                                  │
-│  tokenId 2 ─── Track 2 (ownable, linked to LSP7)                │
-│    ├── LSP4Metadata                                              │
-│    ├── LSP33Metadata                                             │
-│    └── LSP33OwnableTrackToken ──► LSP7 Track Contract            │
-│           ▲  read/write proxy            │                       │
-│           └──────────────────────────────┘                       │
-└──────────────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  Linked LSP7 Track Contract                                     │
-│  owner() = artist (via LSP34 → LSP8.tokenOwnerOf(tokenId))      │
-│  LSP8ReferenceContract ──► (LSP8 address, tokenId)               │
-│  LSP34OwnershipSource  ──► (LSP8 address, tokenId)               │
-│  LSP4Metadata  = track display metadata                          │
-│  LSP33Metadata = track music metadata                            │
-│                                                                  │
-│  mint()    → only artist (resolved owner)                        │
-│  setData() → artist OR parent LSP8 (for forwarded writes)        │
-│  balanceOf(collector) → units owned                              │
-└──────────────────────────────────────────────────────────────────┘
-```
+1. On the LSP7: set `LSP34OwnershipSource` = `(lsp8Address, tokenId)`.
+2. On the LSP8: call `setDataForTokenId(tokenId, LSP33OwnableTrackToken, lsp7Address)`.
 
-**LSP8 requirements:**
+Both writes MUST be authorized by the artist (the current `tokenOwnerOf(tokenId)` on the LSP8 side, and the current `owner()` on the LSP7 side — which becomes the same address after linking). The LSP8 SHOULD verify the [bidirectional link](#bidirectional-link-verification) before committing.
 
-- MUST set `LSP4TokenType` to `2` (Collection).
-- SHOULD set `LSP8TokenIdFormat` to `0` (uint256). TokenIds SHOULD be sequential `uint256` starting from `1`.
-- MUST set `SupportedStandards:LSP33MusicNFT`.
-- MUST set `LSP4Metadata` and `LSP33Metadata` on the contract for release data.
-- Per-track data is set via `setDataForTokenId`.
-- MUST implement the routing behavior below for tokenIds that have `LSP33OwnableTrackToken` set.
+Because linking is just two data-key writes, any of these workflows is valid:
 
-**Linked LSP7 requirements (optional per track):**
+1. **Release-first.** Deploy an LSP8, add metadata-only tracks. Later, deploy an LSP7 for any track and link it — that track becomes ownable without touching the others.
+2. **Track-first.** Deploy a standalone LSP7 (LSP34 source unset → ERC173 owner = artist). Later, deploy or reuse an LSP8, mint a tokenId for this track, and link. The LSP7 now derives its owner from the LSP8 tokenId.
+3. **Both at once.** Deploy LSP8 + LSP7 in one transaction and link immediately.
+4. **Pure standalone.** Deploy only an LSP7. It never has to join a collection.
 
-- MUST implement [LSP34] with `LSP34OwnershipSource` = `(LSP8 address, tokenId)`.
-- MUST set `LSP8ReferenceContract` to `(LSP8 address, tokenId)`.
-- MUST cache the parent LSP8 address as an `immutable` variable (set in constructor). This avoids repeated ERC725Y reads on every `owner()` call and ensures the parent reference cannot be changed.
-- MUST resolve `owner()` via LSP34.
-- MUST restrict minting to the resolved owner.
-- MUST accept `setData` and `setDataBatch` calls from either the resolved owner OR the cached parent LSP8 address (see [Parent Collection Authorization](#parent-collection-authorization)).
-- SHOULD set `decimals()` to `0`.
-- SHOULD set `LSP4TokenType` to `1`.
+### Data Routing
 
-Where a track is **metadata-only**, only per-tokenId `LSP4Metadata` / `LSP33Metadata` are set on the LSP8 — no LSP7, no `LSP33OwnableTrackToken`.
+When `LSP33OwnableTrackToken` is set for a tokenId, the LSP8 MUST act as a transparent router for the data keys `LSP4Metadata` and `LSP33Metadata`. All other data keys are read/written locally on the LSP8's tokenId storage.
 
-### Data Routing (LSP8 ↔ Linked LSP7)
-
-When `LSP33OwnableTrackToken` is set for a tokenId, the LSP8 MUST act as a transparent router for the metadata data keys `LSP4Metadata` and `LSP33Metadata`. All other data keys are read/written locally on the LSP8's tokenId storage.
-
-#### Reads: `getDataForTokenId`
+**Reads — `getDataForTokenId(tokenId, dataKey)`:**
 
 ```
-getDataForTokenId(tokenId, dataKey)
-  │
-  ├── LSP33OwnableTrackToken set?
-  │     │
-  │     NO  ──► return LSP8 local tokenId storage
-  │     │
-  │     YES ──► is dataKey LSP4Metadata or LSP33Metadata?
-  │              │
-  │              NO  ──► return LSP8 local tokenId storage
-  │              │
-  │              YES ──► call LSP7.getData(dataKey)
-  │                        ├── success ──► return LSP7 value
-  │                        └── revert  ──► fallback to LSP8 local tokenId storage
+LSP33OwnableTrackToken unset OR dataKey not LSP4/LSP33 Metadata
+  → return LSP8 local tokenId storage
+
+otherwise
+  → call LSP7.getData(dataKey)
+     success → return LSP7 value
+     revert  → fall back to LSP8 local tokenId storage
 ```
 
 The fallback keeps metadata available if the linked LSP7 becomes unreachable.
 
-#### Writes: `setDataForTokenId`
+**Writes — `setDataForTokenId(tokenId, dataKey, value)`:**
 
 ```
-setDataForTokenId(tokenId, dataKey, value)
-  │
-  ├── require: msg.sender == tokenOwnerOf(tokenId)   // NOT contract owner()
-  │
-  ├── LSP33OwnableTrackToken set?
-  │     │
-  │     NO  ──► write to LSP8 local tokenId storage, emit TokenIdDataChanged
-  │     │
-  │     YES ──► is dataKey LSP4Metadata or LSP33Metadata?
-  │              │
-  │              NO  ──► write to LSP8 local tokenId storage, emit TokenIdDataChanged
-  │              │
-  │              YES ──► call LSP7.setData(dataKey, value)
-  │                        ├── success ──► LSP7 emits DataChanged; LSP8 emits NO event
-  │                        └── revert  ──► whole call reverts
+require: msg.sender == tokenOwnerOf(tokenId)   // NOT the contract owner()
+
+LSP33OwnableTrackToken unset OR dataKey not LSP4/LSP33 Metadata
+  → write to LSP8 local tokenId storage, emit TokenIdDataChanged
+
+otherwise
+  → call LSP7.setData(dataKey, value)
+     success → LSP7 emits DataChanged; LSP8 emits no event
+     revert  → whole call reverts
 ```
 
-**Access control.** `setDataForTokenId` is gated by `tokenOwnerOf(tokenId)`, **not** the contract-level `owner()`. Since the linked LSP7 resolves `owner()` via LSP34 to the same `tokenOwnerOf(tokenId)`, both paths converge on the artist.
+**Access control.** `setDataForTokenId` is gated by `tokenOwnerOf(tokenId)`, not the contract-level `owner()`. Because a linked LSP7 resolves `owner()` via LSP34 to the same address, both write paths converge on the artist.
 
-**Events.** When a write is forwarded, the LSP8 does **not** emit `TokenIdDataChanged` — the data is not stored on the LSP8. The LSP7 emits its own `DataChanged`. Indexers reading per-tokenId metadata MUST follow the `LSP33OwnableTrackToken` link and subscribe to `DataChanged` on the LSP7. `TokenIdDataChanged` events from the LSP8 only reflect locally stored data (non-metadata keys, or tokenIds without a linked LSP7).
+**Events.** The LSP8 does **not** emit `TokenIdDataChanged` for forwarded writes — the data lives on the LSP7, which emits its own `DataChanged`. Indexers MUST follow the `LSP33OwnableTrackToken` link and subscribe to `DataChanged` on the LSP7. `TokenIdDataChanged` on the LSP8 only reflects locally stored data.
 
-#### Parent Collection Authorization
+#### Parent Authorization
 
-A linked LSP7 MUST accept `setData` / `setDataBatch` calls if **either**:
+A linked LSP7 MUST accept `setData` / `setDataBatch` if **either**:
 
-1. `msg.sender == owner()` (the resolved artist via LSP34), **or**
-2. `msg.sender == immutableParentLSP8` (the cached parent address set in the constructor).
+1. `msg.sender == owner()` (the artist, via LSP34), **or**
+2. `msg.sender` equals the parent LSP8 address cached as an `immutable` in the LSP7 constructor.
 
-This is safe because the LSP8 already enforces `tokenOwnerOf(tokenId)` before forwarding, and both paths resolve to the same artist address. The LSP7 only trusts the specific LSP8 set immutably at deployment.
+This is safe because the LSP8 already enforces `tokenOwnerOf(tokenId)` before forwarding, both paths resolve to the same artist, and the LSP7 only trusts the specific LSP8 fixed at deployment.
 
 #### Bidirectional Link Verification
 
-When setting `LSP33OwnableTrackToken` for a tokenId, the LSP8 SHOULD verify that the linked LSP7's `LSP8ReferenceContract` points back to `(address(this), tokenId)`. If verification fails, the call SHOULD revert.
+Before setting `LSP33OwnableTrackToken` for a tokenId, the LSP8 SHOULD verify that the referenced LSP7's `LSP8ReferenceContract` points back to `(address(this), tokenId)`. If verification fails, the call SHOULD revert.
 
 ### ERC725Y Data Keys
 
@@ -224,7 +151,7 @@ When setting `LSP33OwnableTrackToken` for a tokenId, the LSP8 SHOULD verify that
 }
 ```
 
-Indicates that the contract implements LSP33. MUST be set on a standalone LSP7 (Path 1) or on the LSP8 collection (Path 2).
+MUST be set on any LSP33 contract — LSP8 release or LSP7 track.
 
 #### LSP33OwnableTrackToken
 
@@ -238,12 +165,12 @@ Indicates that the contract implements LSP33. MUST be set on a standalone LSP7 (
 }
 ```
 
-**Path 2 only.** Set per-tokenId via `setDataForTokenId` on the LSP8. Points to an LSP7 contract representing ownable units of that track.
+Set per-tokenId on the LSP8 via `setDataForTokenId`, pointing to a linked LSP7.
 
-- **Not set** → the tokenId is metadata-only.
-- **Set** → the referenced LSP7 MUST satisfy the linked LSP7 requirements above.
+- **Unset** → the tokenId is metadata-only.
+- **Set** → the referenced LSP7 must meet the [LSP7 building-block requirements](#lsp7-ownable-track).
 
-_Requirements:_
+Requirements:
 
 - MUST only be settable by `tokenOwnerOf(tokenId)`.
 - SHOULD be verified bidirectionally before being set.
@@ -263,27 +190,20 @@ The value MAY be encoded as either 20 bytes (`abi.encodePacked(address)`) or 32 
 }
 ```
 
-References the extended music metadata JSON file. A separate file from `LSP4Metadata`, stored under its own data key.
-
-Can be set:
-
-- On a **standalone LSP7 contract** (Path 1, track-level).
-- On the **LSP8 contract** (Path 2, release-level).
-- Per **tokenId** via `setDataForTokenId` on the LSP8 (Path 2, track-level).
-- On a **linked LSP7 contract** (Path 2, track-level — accessed via the LSP8 router).
+References the extended music metadata JSON file (see below). Can be set at the contract level on an LSP7 or LSP8, or per-tokenId on an LSP8.
 
 ### Metadata Model
 
-LSP33 uses **two separate data keys** for metadata:
+LSP33 uses two data keys:
 
 - **`LSP4Metadata`** (from [LSP4]) — human-readable: name, description, artwork, links, audio assets, attributes. MUST include top-level `"category": "Music"`.
-- **`LSP33Metadata`** (this standard) — structured: contributors, identifiers, copyright, lyrics, preview, stems, DDEX.
+- **`LSP33Metadata`** (this standard) — structured music data: contributors, identifiers, copyright, lyrics, preview, stems, DDEX.
 
-Each key is typically a **separate JSON file**. They MAY be combined into a single JSON document with both keys as top-level properties — in which case both data keys reference the same URI. Combining is an optimization, not a requirement.
+Each key is typically a **separate JSON file**. They MAY be combined into a single JSON document with both keys as top-level properties (in which case both data keys reference the same URI) — an optimization, not a requirement.
 
-#### Release / Album — `LSP4Metadata` Attributes
+#### LSP4Metadata Attributes
 
-Set on the LSP8 contract (Path 2).
+**Release level** (set on the LSP8 contract):
 
 | Attribute | Required | Description |
 | :--- | :---: | :--- |
@@ -296,14 +216,12 @@ Set on the LSP8 contract (Path 2).
 | `Secondary Genre` |  | Secondary genre |
 | `Language` |  | ISO 639-2 code |
 
-#### Track — `LSP4Metadata` Attributes
-
-Set on a standalone LSP7 (Path 1), on an LSP8 tokenId (Path 2), or on a linked LSP7 (Path 2).
+**Track level** (set on an LSP7 contract, or per-tokenId on an LSP8):
 
 | Attribute | Required | Description |
 | :--- | :---: | :--- |
 | `Artist` | ✓ | Track artist |
-| `Track Number` | ✓ | Position in release (use `1` for standalone) |
+| `Track Number` | ✓ | Position in release (use `1` when standalone) |
 | `Primary Genre` | ✓ | Primary genre |
 | `Release Date` | ✓ | ISO 8601 |
 | `Duration` |  | e.g. `3:35` or `PT3M35S` |
@@ -314,7 +232,7 @@ Set on a standalone LSP7 (Path 1), on an LSP8 tokenId (Path 2), or on a linked L
 | `Secondary Genre` |  | Secondary genre |
 | `Language` |  | ISO 639-2 code |
 
-#### `LSP33Metadata` Fields
+#### LSP33Metadata Fields
 
 | Field | Level | Description |
 | :--- | :---: | :--- |
@@ -323,12 +241,12 @@ Set on a standalone LSP7 (Path 1), on an LSP8 tokenId (Path 2), or on a linked L
 | `copyright` | Release & Track | `pLine` (℗) and `cLine` (©) |
 | `lyrics` | Track | Full lyrics text, language, synced flag |
 | `preview` | Track | `startMs`, `durationMs` |
-| `stems` | Track | Array of stem files (name, url, fileType, verification) |
+| `stems` | Track | Stem/multitrack files |
 | `ddex` | Release & Track | DDEX ERN XML reference |
 
 ##### Contributors
 
-Ordered array. Array order = intended display sequence (maps to DDEX `SequenceNumber`).
+Ordered array. Order = display sequence (maps to DDEX `SequenceNumber`).
 
 ```json
 {
@@ -347,7 +265,7 @@ Ordered array. Array order = intended display sequence (maps to DDEX `SequenceNu
 | `email` | `string` |  |
 | `roles` | `string[]` | ✓ |
 
-Common roles (extensible — any role MAY be used):
+Common roles (extensible):
 
 | Role | DDEX Equivalent |
 | :--- | :--- |
@@ -449,13 +367,9 @@ Reference to a [DDEX ERN](https://ddex.net/standards/electronic-release-notifica
 
 ### Full Metadata Examples
 
-LSP33 uses **four separate files** for a release with tracks: one `LSP4Metadata` and one `LSP33Metadata` for the release, and one of each per track. They MAY be combined into fewer files, but are shown separate here.
+A release with tracks naturally produces **four separate files** — one `LSP4Metadata` and one `LSP33Metadata` for the release, and one of each per track. A standalone LSP7 only needs the two track files. Files MAY be combined into fewer.
 
-For **Path 1 (standalone LSP7)**, only the two track files are needed (the LSP7 holds `LSP4Metadata` + `LSP33Metadata` directly).
-
-#### Release — `LSP4Metadata` File
-
-Referenced by the LSP8 contract's `LSP4Metadata` data key.
+#### Release — `LSP4Metadata`
 
 ```json
 {
@@ -499,9 +413,7 @@ Referenced by the LSP8 contract's `LSP4Metadata` data key.
 }
 ```
 
-#### Release — `LSP33Metadata` File
-
-Referenced by the LSP8 contract's `LSP33Metadata` data key.
+#### Release — `LSP33Metadata`
 
 ```json
 {
@@ -527,9 +439,7 @@ Referenced by the LSP8 contract's `LSP33Metadata` data key.
 }
 ```
 
-#### Track — `LSP4Metadata` File
-
-Referenced on a standalone LSP7 (Path 1), or per-tokenId via `setDataForTokenId` / on a linked LSP7 (Path 2).
+#### Track — `LSP4Metadata`
 
 ```json
 {
@@ -577,7 +487,7 @@ Referenced on a standalone LSP7 (Path 1), or per-tokenId via `setDataForTokenId`
 }
 ```
 
-#### Track — `LSP33Metadata` File
+#### Track — `LSP33Metadata`
 
 ```json
 {
@@ -633,71 +543,23 @@ Referenced on a standalone LSP7 (Path 1), or per-tokenId via `setDataForTokenId`
 }
 ```
 
-### Lifecycle
-
-#### Path 1 — Deploying a Standalone Track
-
-1. Deploy an LSP7 with `LSP4TokenType = 1`, `decimals = 0`, and the artist as `owner()`.
-2. Upload `LSP4Metadata` and `LSP33Metadata` JSON files.
-3. Set `LSP4Metadata`, `LSP33Metadata`, and `SupportedStandards:LSP33MusicNFT` on the LSP7.
-4. The artist mints units to sell to collectors.
-
-#### Path 2 — Creating a Release
-
-1. Deploy an LSP8 with `LSP4TokenType = 2` and the artist as `owner()`.
-2. Upload release `LSP4Metadata` and `LSP33Metadata` files.
-3. Set `LSP4Metadata`, `LSP33Metadata`, and `SupportedStandards:LSP33MusicNFT` on the LSP8.
-
-#### Path 2 — Adding a Metadata-Only Track
-
-1. Mint a tokenId on the LSP8 (owner = artist).
-2. Upload track `LSP4Metadata` and `LSP33Metadata` files.
-3. Call `setDataForTokenId(tokenId, LSP4Metadata, ...)` and `setDataForTokenId(tokenId, LSP33Metadata, ...)`.
-
-#### Path 2 — Making a Track Ownable
-
-1. Deploy an LSP7 with:
-   - `LSP34OwnershipSource` = `(LSP8 address, tokenId)`
-   - `LSP8ReferenceContract` = `(LSP8 address, tokenId)`
-   - The parent LSP8 address cached as an `immutable`.
-2. Set `LSP4Metadata` and `LSP33Metadata` on the LSP7.
-3. On the LSP8, call `setDataForTokenId(tokenId, LSP33OwnableTrackToken, lsp7Address)`. The LSP8 SHOULD verify the bidirectional link first.
-4. From now on, the LSP8 routes metadata reads and writes for that tokenId to the LSP7.
-5. The artist mints LSP7 units for collectors.
-
 ## Rationale
 
-### Two Paths, One Standard
+**Plug-and-play composition.** The LSP8 release and LSP7 track are independent building blocks joined by a single data key. Any workflow — release-first, track-first, both-at-once, or pure standalone — works from the same primitives. No migration contracts, no special "upgrade" paths.
 
-Not every track needs a parent release. A standalone LSP7 is the simplest possible "music NFT" — one track, one contract, units for collectors. The LSP8 collection path exists when tracks belong together in a release, or when the artist wants a single on-chain entity representing the album. Both paths share the same metadata model and the same `SupportedStandards` marker so tooling can recognize them uniformly.
+**Composition over new contracts.** LSP33 reuses LSP4, LSP7, LSP8, and LSP34. Existing wallets, indexers, and marketplaces already understand these primitives.
 
-### Composability Over New Contracts
+**Transparent data routing.** Making the LSP8 a router for linked LSP7 metadata gives artists one interface, prevents metadata drift between contracts, and degrades gracefully to an LSP8 local fallback if the LSP7 is unreachable.
 
-LSP33 composes LSP4, LSP7, LSP8, and LSP34 rather than defining new token types. Existing wallets, indexers, and marketplaces already understand these primitives.
+**`tokenOwnerOf` access control.** Gating `setDataForTokenId` on `tokenOwnerOf(tokenId)` — not the contract `owner()` — and mirroring the same resolution on the LSP7 via LSP34 ensures there is exactly one concept of "the artist" for each track, and that transferring the tokenId transfers control of both sides together.
 
-### Separate Metadata Files
+**Artist vs collector separation.** Authorship lives in the LSP8 tokenId (or the LSP7 `owner()` when standalone); collectibility lives in LSP7 `balanceOf`. Units can change hands freely without ever touching metadata or minting.
 
-`LSP4Metadata` and `LSP33Metadata` are separate data keys so that any LSP4-aware interface works out of the box, concerns stay cleanly separated, and each can evolve independently. They may still be combined into one file when desired.
-
-### Transparent Data Routing
-
-In Path 2, making the LSP8 a transparent router for linked LSP7 metadata gives artists a unified interface, prevents metadata drift between contracts, and degrades gracefully to LSP8 local fallback if the LSP7 becomes unreachable.
-
-### Parent Collection Authorization
-
-The linked LSP7 trusting its parent LSP8 for `setData` is safe because the LSP8 enforces `tokenOwnerOf(tokenId)` before forwarding, both the LSP8 and the LSP7 resolve the same artist address via LSP34, and the LSP7 only trusts the specific LSP8 set immutably at construction.
-
-### Artist vs Collector Ownership
-
-Separating authorship (LSP8 tokenId or standalone LSP7 `owner()`) from collectibility (LSP7 `balanceOf`) ensures the artist always controls their work. LSP7 holders can freely trade units without ever touching metadata or minting — which is what Konstantin's original concern about LSP8 tokenId transfers was about, and why the access model is built around `tokenOwnerOf` rather than generic token holders.
-
-### Metadata-Only Tracks (Path 2)
-
-A track without `LSP33OwnableTrackToken` is simply metadata on an LSP8 tokenId — useful for proving creation or making tracks discoverable without issuing collectibles.
+**Separate metadata files.** `LSP4Metadata` and `LSP33Metadata` are separate data keys so any LSP4-aware interface works out of the box and each can evolve independently. They may still be combined into a single file when desired.
 
 ## Implementation
 
-A reference implementation can be found in [lukso-network/lsp-smart-contracts#1088](https://github.com/lukso-network/lsp-smart-contracts/pull/1088).
+Reference implementation: [lukso-network/lsp-smart-contracts#1088](https://github.com/lukso-network/lsp-smart-contracts/pull/1088).
 
 ERC725Y JSON Schema `LSP33MusicNFT`:
 
@@ -731,7 +593,7 @@ ERC725Y JSON Schema `LSP33MusicNFT`:
 
 Copyright and related rights waived via [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
 
-[ERC165]: https://eips.ethereum.org/EIPS/eip-165
+[ERC173]: https://eips.ethereum.org/EIPS/eip-173
 [ERC725Y]: https://github.com/ERC725Alliance/ERC725/blob/develop/docs/ERC-725.md#erc725y
 [LSP2]: ./LSP-2-ERC725YJSONSchema.md
 [LSP4]: ./LSP-4-DigitalAsset-Metadata.md
