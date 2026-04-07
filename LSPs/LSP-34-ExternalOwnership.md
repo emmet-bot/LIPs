@@ -1,73 +1,31 @@
 ---
 lip: 34
-title: External Ownership
+title: External Owner Source
 author: Fabian Vogelsteller <fabian@universaleverything.io>, Thomas Beard <thomas@universaleverything.io>
 discussions-to: https://t.me/+PjX_Awnpjh8xYWE0
 status: Draft
 type: LSP
 created: 2025-03-20
-requires: ERC165, ERC725Y, LSP2
+requires: ERC725Y
 ---
 
 ## Simple Summary
 
-A standard that allows any [ERC725Y] contract to derive its owner from an external contract, such as an [LSP8] tokenId owner or any [ERC173] Ownable contract.
+A single [ERC725Y] data key that lets a contract derive its owner from another contract — typically an [LSP8] tokenId.
 
 ## Abstract
 
-This standard defines a single [ERC725Y] data key that references an external contract (and optionally a tokenId) from which the implementing contract resolves its `owner()`. Instead of storing the owner locally, the contract reads it dynamically from the referenced source.
+This standard defines **one** data key, `LSP34OwnershipSource`, that points to an external contract (and optionally a tokenId) from which the implementing contract resolves its `owner()`.
 
-This enables **ownership delegation** — a pattern where one contract's ownership is derived from another contract's state. For example, an LSP7 contract can be "owned by" whoever currently owns a specific tokenId in an LSP8 collection, without requiring manual ownership synchronization.
+Instead of storing an owner locally, the contract reads it from the referenced source. This is used, for example, by an [LSP7] track token in [LSP33] Music NFTs to derive its owner from the track's tokenId owner in an [LSP8] release.
 
 ## Motivation
 
-In composable smart contract systems, one contract's ownership is often logically tied to another contract's state. Current approaches require manual transfers, custom hooks, or centralized coordination to keep ownership consistent — all of which are fragile, gas-expensive, and error-prone.
-
-A declarative approach — "my owner is whoever owns tokenId X in contract Y" — is simpler, cheaper, and always consistent.
-
-**Use cases include:**
-
-- **Music NFTs ([LSP33])**: An LSP7 contract representing ownable track units derives its owner from the track's tokenId owner in an LSP8 release.
-- **Sub-assets**: Any asset contract controlled by the owner of a parent NFT.
-- **DAO-governed contracts**: A contract owned by whoever holds a specific governance token or position.
-- **Delegated vaults**: An [LSP9-Vault](./LSP-9-Vault.md) controlled by the owner of a specific NFT.
+Some contracts are logically owned by "whoever owns something else". Manually transferring ownership whenever the upstream owner changes is fragile. LSP34 replaces that with a single declarative pointer: *"my owner lives over there."*
 
 ## Specification
 
-### Owner Resolution
-
-A contract implementing LSP34 MUST override the `owner()` function (from [ERC173]) to resolve the owner dynamically:
-
-1. Read the `LSP34OwnershipSource` data key from its own [ERC725Y] storage.
-2. Decode the value as `(address sourceContract, bytes32 tokenId)`.
-3. **If `tokenId != bytes32(0)`**: Call `tokenOwnerOf(tokenId)` on `sourceContract` and return the result.
-4. **If `tokenId == bytes32(0)`**: Call `owner()` on `sourceContract` and return the result.
-5. **If the data key is not set** (empty bytes): Fall back to the local owner state variable (standard [ERC173] behavior).
-
-### Ownership Transfer
-
-Since the owner is derived externally, `transferOwnership()` and `renounceOwnership()` MUST behave as follows when `LSP34OwnershipSource` is set:
-
-- **`transferOwnership(address)`**: MUST revert. Ownership is transferred by transferring the referenced token or changing ownership on the source contract.
-- **`renounceOwnership()`**: MUST revert.
-
-If the `LSP34OwnershipSource` data key is not set, both functions MUST behave as standard [ERC173] (i.e., call the inherited `transferOwnership` / `renounceOwnership`).
-
-### ERC725Y Data Keys
-
-#### SupportedStandards:LSP34ExternalOwnership
-
-```json
-{
-  "name": "SupportedStandards:LSP34ExternalOwnership",
-  "key": "0xeafec4d89fa9619884b600000dd104e111c91ef2cbd7b5824c859213bc599feb",
-  "keyType": "Mapping",
-  "valueType": "bytes4",
-  "valueContent": "0x36a53360"
-}
-```
-
-Indicates that the contract implements the LSP34 External Ownership standard.
+### ERC725Y Data Key
 
 #### LSP34OwnershipSource
 
@@ -81,71 +39,44 @@ Indicates that the contract implements the LSP34 External Ownership standard.
 }
 ```
 
-References the external contract (and optionally a tokenId) from which this contract derives its owner.
-
 **Value encoding:** `abi.encode(address sourceContract, bytes32 tokenId)`
 
-- `sourceContract`: The address of the contract to query for ownership.
-- `tokenId`: The tokenId to query. If `bytes32(0)`, the contract calls `owner()` on the source instead of `tokenOwnerOf(tokenId)`.
+- `sourceContract` — the contract to query for ownership.
+- `tokenId` — the tokenId to query on `sourceContract`. If `bytes32(0)`, query `owner()` on `sourceContract` instead of `tokenOwnerOf(tokenId)`.
 
-_Requirements:_
+### Owner Resolution
 
-- MUST only be settable by the current owner (as resolved by `owner()`).
-- When set, `owner()` MUST resolve from the external source.
-- When removed (set to empty bytes), the contract SHOULD fall back to the local owner variable. The local owner SHOULD be set to the last resolved external owner before clearing, to prevent ownership loss.
+A contract implementing LSP34 MUST override `owner()` to:
 
-_Recommendations:_
+1. Read `LSP34OwnershipSource` from its own ERC725Y storage.
+2. If unset, fall back to local [ERC173] behavior.
+3. If `tokenId != bytes32(0)`, return `ILSP8(sourceContract).tokenOwnerOf(tokenId)`.
+4. If `tokenId == bytes32(0)`, return `IERC173(sourceContract).owner()`.
 
-- SHOULD be set during contract deployment and not changed afterward.
-- Implementations SHOULD validate that `sourceContract` is a valid contract address before accepting the value.
+### Ownership Transfer
 
-### Security Considerations
+When `LSP34OwnershipSource` is set, `transferOwnership(address)` and `renounceOwnership()` MUST revert — ownership is transferred by moving the upstream token/owner.
 
-#### Circular Ownership
+When the key is not set, both functions behave as standard [ERC173].
 
-Implementations MUST guard against circular ownership references (contract A derives owner from B, B derives from A). Implementations SHOULD set a maximum resolution depth of **1 hop** — meaning the LSP34 contract makes exactly one external call (`tokenOwnerOf` or `owner()`) and treats the returned address as the final owner, regardless of whether that address itself uses LSP34 internally. If the resolved owner is `address(0)` or the call fails, implementations SHOULD fall back to the local owner variable.
+### Access Control
 
-#### `bytes32(0)` TokenId Reservation
-
-`bytes32(0)` is reserved as the sentinel value meaning "call `owner()` instead of `tokenOwnerOf()`." Implementations using sequential `uint256` tokenIds (encoded as `bytes32`) SHOULD start from `1`, not `0`, to avoid ambiguity.
-
-#### Source Contract Availability
-
-If `sourceContract` is destroyed or becomes unreachable, the `owner()` call will revert. Implementations SHOULD handle this gracefully by catching the revert and falling back to the local owner variable (`super.owner()`). Caching the source contract address as an `immutable` variable (set in the constructor) is RECOMMENDED to avoid depending on ERC725Y storage reads for the source address.
-
-#### Access Control
-
-The `LSP34OwnershipSource` data key is protected by standard [ERC725Y] access control — only the current `owner()` can call `setData`. This creates a consistent trust chain: the entity that controls the upstream ownership also controls the LSP34 configuration.
+`LSP34OwnershipSource` is protected by standard ERC725Y access control — only the current `owner()` can set it.
 
 ## Rationale
 
-### Single Data Key Design
+LSP34 is intentionally minimal: one data key, one resolution rule. The `bytes32` tokenId field handles both cases (LSP8 tokenId owner, or plain ERC173 `owner()`) without a second key.
 
-A single data key with a tuple value `(address, bytes32)` keeps the standard minimal. The `bytes32` tokenId field handles both use cases: set it to a specific tokenId for LSP8 ownership, or to `bytes32(0)` to signal "call `owner()` instead."
-
-### Fallback to Local Owner
-
-When `LSP34OwnershipSource` is not set, the contract behaves as a normal [ERC173] Ownable contract. This means LSP34 is backwards-compatible — a contract can start with local ownership and later delegate to external ownership, or vice versa.
-
-### Why Not Proxy/Delegatecall
-
-Proxy-based approaches require compatible storage layouts. LSP34 is a pure read — it queries the external contract's state without coupling beyond the `tokenOwnerOf` or `owner()` interface, working with any existing LSP8 or ERC173 contract without modifications.
+`bytes32(0)` is reserved as the "call owner() instead" sentinel. Implementations using sequential `uint256` tokenIds SHOULD start from `1`.
 
 ## Implementation
 
-An implementation can be found in [lukso-network/lsp-smart-contracts#1088](https://github.com/lukso-network/lsp-smart-contracts/pull/1088).
+Reference implementation: [lukso-network/lsp-smart-contracts#1088](https://github.com/lukso-network/lsp-smart-contracts/pull/1088).
 
 ERC725Y JSON Schema `LSP34ExternalOwnership`:
 
 ```json
 [
-  {
-    "name": "SupportedStandards:LSP34ExternalOwnership",
-    "key": "0xeafec4d89fa9619884b600000dd104e111c91ef2cbd7b5824c859213bc599feb",
-    "keyType": "Mapping",
-    "valueType": "bytes4",
-    "valueContent": "0x36a53360"
-  },
   {
     "name": "LSP34OwnershipSource",
     "key": "0xa8bc5aea0671308a0920eb016db4108c486ef117a7cd18bf3a9dfcadab6232e1",
@@ -160,10 +91,8 @@ ERC725Y JSON Schema `LSP34ExternalOwnership`:
 
 Copyright and related rights waived via [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
 
-[ERC165]: https://eips.ethereum.org/EIPS/eip-165
 [ERC173]: https://eips.ethereum.org/EIPS/eip-173
 [ERC725Y]: https://github.com/ERC725Alliance/ERC725/blob/develop/docs/ERC-725.md#erc725y
-[LSP2]: ./LSP-2-ERC725YJSONSchema.md
+[LSP7]: ./LSP-7-DigitalAsset.md
 [LSP8]: ./LSP-8-IdentifiableDigitalAsset.md
-[LSP9]: ./LSP-9-Vault.md
 [LSP33]: ./LSP-33-MusicNFT.md
