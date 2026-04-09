@@ -1,6 +1,6 @@
 ---
 lip: 34
-title: External Owner Source
+title: External Minting Rights
 author: Fabian Vogelsteller <fabian@universaleverything.io>, Thomas Beard <thomas@universaleverything.io>
 discussions-to: https://t.me/+PjX_Awnpjh8xYWE0
 status: Draft
@@ -11,17 +11,17 @@ requires: ERC725Y
 
 ## Simple Summary
 
-A single [ERC725Y] data key that lets a contract derive its owner from another contract — typically an [LSP8] tokenId.
+A single [ERC725Y] data key that grants minting rights on a contract to whoever controls an external source — typically an [LSP8] tokenId.
 
 ## Abstract
 
-This standard defines **one** data key, `LSP34OwnershipSource`, that points to an external contract (and optionally a tokenId) from which the implementing contract resolves its `owner()`.
+This standard defines **one** data key, `LSP34OwnershipSource`, that points to an external contract (and optionally a tokenId) from which the implementing contract resolves an **authorized minter**.
 
-Instead of storing an owner locally, the contract reads it from the referenced source. This is used, for example, by an [LSP7] track token in [LSP33] Music NFTs to derive its owner from the track's tokenId owner in an [LSP8] release.
+The contract's `owner()` remains the standard [ERC173] owner (the artist). `LSP34OwnershipSource` does **not** override ownership — it only grants the resolved address permission to call `mint()`. This is used, for example, by an [LSP7] track token in [LSP33] Music NFTs: the artist stays the owner and controls metadata, while the address controlling the linked [LSP8] tokenId can mint new units.
 
 ## Motivation
 
-Some contracts are logically owned by "whoever owns something else". Manually transferring ownership whenever the upstream owner changes is fragile. LSP34 replaces that with a single declarative pointer: *"my owner lives over there."*
+Some contracts need to let an external party mint tokens without giving up ownership. For example, a label or platform that controls an LSP8 release should be able to mint collectible units on the corresponding LSP7 track, while the artist retains full control over metadata and contract ownership. LSP34 provides a single declarative pointer: *"whoever controls that token can mint here."*
 
 ## Specification
 
@@ -41,23 +41,29 @@ Some contracts are logically owned by "whoever owns something else". Manually tr
 
 **Value encoding:** `abi.encode(address sourceContract, bytes32 tokenId)`
 
-- `sourceContract` — the contract to query for ownership.
+- `sourceContract` — the contract to query for the authorized minter.
 - `tokenId` — the tokenId to query on `sourceContract`. If `bytes32(0)`, query `owner()` on `sourceContract` instead of `tokenOwnerOf(tokenId)`.
 
-### Owner Resolution
+### Minting Rights Resolution
 
-A contract implementing LSP34 MUST override `owner()` to:
+A contract implementing LSP34 MUST allow `mint()` to be called by:
 
-1. Read `LSP34OwnershipSource` from its own ERC725Y storage.
-2. If unset, fall back to local [ERC173] behavior.
-3. If `tokenId != bytes32(0)`, return `ILSP8(sourceContract).tokenOwnerOf(tokenId)`.
-4. If `tokenId == bytes32(0)`, return `IERC173(sourceContract).owner()`.
+1. The contract's own `owner()` (standard [ERC173] owner — the artist), **or**
+2. The address resolved from `LSP34OwnershipSource`:
+   - If `tokenId != bytes32(0)`, this is `ILSP8(sourceContract).tokenOwnerOf(tokenId)`.
+   - If `tokenId == bytes32(0)`, this is `IERC173(sourceContract).owner()`.
 
-### Ownership Transfer
+If `LSP34OwnershipSource` is unset, only the contract's `owner()` can mint.
 
-When `LSP34OwnershipSource` is set, `transferOwnership(address)` and `renounceOwnership()` MUST revert — ownership is transferred by moving the upstream token/owner.
+### Ownership
 
-When the key is not set, both functions behave as standard [ERC173].
+LSP34 does **not** affect `owner()`. The contract's [ERC173] owner remains unchanged regardless of whether `LSP34OwnershipSource` is set. This means:
+
+- `owner()` always returns the standard [ERC173] owner.
+- `transferOwnership(address)` and `renounceOwnership()` behave as standard [ERC173].
+- `setData` and `setDataBatch` remain restricted to the contract's `owner()` (the artist).
+
+Only minting rights are delegated. The artist retains full control over metadata, ownership, and contract configuration.
 
 ### Access Control
 
@@ -65,9 +71,11 @@ When the key is not set, both functions behave as standard [ERC173].
 
 ## Rationale
 
-LSP34 is intentionally minimal: one data key, one resolution rule. The `bytes32` tokenId field handles both cases (LSP8 tokenId owner, or plain ERC173 `owner()`) without a second key.
+LSP34 is intentionally minimal: one data key, one resolution rule for minting rights. The `bytes32` tokenId field handles both cases (LSP8 tokenId owner, or plain ERC173 `owner()`) without a second key.
 
 `bytes32(0)` is reserved as the "call owner() instead" sentinel. Implementations using sequential `uint256` tokenIds SHOULD start from `1`.
+
+By keeping ownership untouched, LSP34 ensures that artists never lose control over their contracts. The only capability delegated is minting, which is a narrow, well-defined permission.
 
 ## Implementation
 
