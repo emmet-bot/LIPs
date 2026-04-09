@@ -6,22 +6,30 @@ discussions-to: https://t.me/+PjX_Awnpjh8xYWE0
 status: Draft
 type: LSP
 created: 2025-03-20
-requires: ERC165, ERC725Y, LSP2, LSP4, LSP7, LSP8
+requires: ERC725Y, LSP2, LSP4
 ---
 
 ## Simple Summary
 
-A metadata standard for music on LUKSO. Defines the structured data that any music NFT — whether an [LSP8] release collection, an [LSP7] track token, or both — MUST carry.
+A generic music metadata standard for any [ERC725Y] contract on LUKSO. Defines the structured data that any contract carrying music — an [LSP7] token, an [LSP8] tokenId, a profile, a vault, or any future ERC725Y-based contract — uses to describe a release or track.
 
 ## Abstract
 
-LSP33 defines the **metadata model** for music digital assets on LUKSO. It specifies:
+LSP33 defines a **metadata schema** for music. It is **token-type neutral** and **contract-type neutral**: any [ERC725Y]-compatible contract can carry LSP33 metadata, regardless of whether it represents fungible units, identifiable items, a profile, a vault, or anything else. The schema is the standard; the carrier is up to the application.
+
+LSP33 specifies:
 
 - An **`LSP33Metadata`** data key for structured music data (contributors, identifiers, copyright, lyrics, preview, stems, DDEX, AI usage).
 - Required **`LSP4Metadata` attributes** for release-level and track-level information (artist, genre, release date, etc.).
-- A **`SupportedStandards:LSP33MusicNFT`** marker so indexers and interfaces can identify music assets.
+- A **`SupportedStandards:LSP33MusicNFT`** marker so indexers and interfaces can identify music-bearing contracts.
 
-LSP33 is purely about **what data a music NFT carries**, not how contracts are linked or how ownership is resolved. For linking an [LSP8] release to [LSP7] track tokens, see [LSP35]. For delegating minting rights, see [LSP34].
+LSP33 is purely about **what data a music asset carries**. It does not prescribe a token type, an ownership model, a linking scheme, or a minting policy:
+
+- For carrying music on an [LSP7] token contract or per-tokenId on an [LSP8] collection — both work out of the box, because both are [ERC725Y].
+- For linking an [LSP8] container tokenId to an [LSP7] item contract with transparent metadata routing, see [LSP35].
+- For delegating minting rights to the holder of an external token, see [LSP34].
+
+A developer adding music metadata to a brand-new contract type only needs to ensure the contract implements [ERC725Y] and writes the data keys defined below.
 
 ### Artist vs Collector Ownership
 
@@ -41,27 +49,39 @@ Music on-chain needs a way to describe releases, tracks, and collectibles with *
 
 ## Specification
 
-### Building Blocks
+### Carrier Requirements
 
-#### LSP8 Release Collection
+LSP33 metadata can be carried by **any [ERC725Y] contract**. An LSP33-compliant carrier MUST:
 
-An LSP8 contract represents a release or album. Each `tokenId` is a track.
+- Implement [ERC725Y].
+- Set `SupportedStandards:LSP33MusicNFT` (see [data keys](#erc725y-data-keys) below) on the relevant ERC725Y storage scope (the contract level for contract-wide metadata, or the per-tokenId scope when the carrier supports per-item ERC725Y storage like [LSP8]).
+- Set `LSP4Metadata` and `LSP33Metadata` on the same scope.
+- Include the [required `LSP4Metadata` attributes](#lsp4metadata-attributes) for the chosen level (release or track).
 
-- MUST set `LSP4TokenType` = `2` (Collection).
-- MUST set `SupportedStandards:LSP33MusicNFT`.
-- MUST set `LSP4Metadata` and `LSP33Metadata` on the contract for release-level data.
+The standard is intentionally agnostic about *which* ERC725Y contract carries the data. The following are common carriers, but they are examples — not the only valid options.
+
+#### Example carrier — LSP7 token
+
+An [LSP7] contract is a natural carrier when a track or release is represented as fungible / non-divisible units (collectible editions, signed copies, semi-fungible assets).
+
+- SHOULD set `LSP4TokenType` = `1` (NFT/NDT) for a single track, or `2` (Collection) for a release.
+- For a non-divisible track collectible, SHOULD set `decimals()` = `0`.
+- All four LSP33 data keys live at the contract level.
+
+#### Example carrier — LSP8 collection
+
+An [LSP8] contract is a natural carrier when a release contains multiple distinct items (tracks of an album, editions of a release) that each need their own metadata scope.
+
+- SHOULD set `LSP4TokenType` = `2` (Collection).
 - SHOULD set `LSP8TokenIdFormat` = `0` (uint256). TokenIds SHOULD be sequential starting from `1`.
-- Per-track metadata is set via `setDataForTokenId(tokenId, LSP4Metadata|LSP33Metadata, value)`.
+- Release-level metadata lives at the contract level.
+- Per-track metadata is written via `setDataForTokenId(tokenId, LSP4Metadata|LSP33Metadata, value)`.
 
-#### LSP7 Track Token
+#### Other carriers
 
-An LSP7 contract represents ownable units of a single track.
+Any other [ERC725Y] contract — a profile ([LSP0]/[LSP3]), a vault ([LSP9]), or a future contract type — can carry LSP33 metadata simply by writing the data keys defined below to its ERC725Y storage. No new token primitive is required, and no specific ownership model is assumed.
 
-- MUST set `SupportedStandards:LSP33MusicNFT`.
-- MUST set `LSP4Metadata` and `LSP33Metadata` on the contract.
-- SHOULD set `LSP4TokenType` = `1` (NFT/NDT) and `decimals()` = `0`.
-
-An LSP7 is deployed as a plain [ERC173]-owned contract — its constructor takes a name, symbol, initial owner (the artist), and divisibility flag. It can be used standalone or linked to an [LSP8] via [LSP35].
+For LSP8 ↔ LSP7 entanglement (transparent metadata routing from a container tokenId to an item contract), see [LSP35]. For delegating minting rights via an external token, see [LSP34]. Both are optional and orthogonal to the metadata schema.
 
 ### ERC725Y Data Keys
 
