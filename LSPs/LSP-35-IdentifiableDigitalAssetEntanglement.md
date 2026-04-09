@@ -6,7 +6,7 @@ discussions-to: https://t.me/+PjX_Awnpjh8xYWE0
 status: Draft
 type: LSP
 created: 2025-03-20
-requires: ERC165, ERC725Y, LSP4, LSP7, LSP8
+requires: ERC165, ERC725Y, LSP4, LSP7, LSP8, LSP34
 ---
 
 ## Simple Summary

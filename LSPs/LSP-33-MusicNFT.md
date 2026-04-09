@@ -31,9 +31,9 @@ LSP33 is purely about **what data a music asset carries**. It does not prescribe
 
 A developer adding music metadata to a brand-new contract type only needs to ensure the contract implements [ERC725Y] and writes the data keys defined below.
 
-### Artist vs Collector Ownership
+### Artist vs Collector Ownership (example role model)
 
-LSP33 separates authorship from collectibility:
+LSP33 itself does not prescribe an ownership model — that is up to the carrier. However, the most common arrangement for music releases on LUKSO is an [LSP8] container holding tokenIds for each track, optionally entangled with a per-track [LSP7] item contract via [LSP35], with minting rights delegated via [LSP34]. In that arrangement the roles separate cleanly:
 
 | | **Artist** | **Minter** | **Collector** |
 |---|---|---|---|
@@ -41,11 +41,15 @@ LSP33 separates authorship from collectibility:
 | **Can do** | Set metadata on the contracts they own | Mint additional LSP7 units of their tokenId | Transfer / trade units |
 | **Tradeable?** | No — represents authorship | Yes — represents the right to mint | Yes — fungible units |
 
-Holding an LSP8 tokenId or LSP7 units never grants control over metadata. Authorship of metadata always stays with the [ERC173] contract `owner()` (the artist). See [LSP34] for the minting-rights model and [LSP35] for the LSP8 ↔ LSP7 entanglement model.
+Holding an LSP8 tokenId or LSP7 units never grants control over metadata. Authorship of metadata always stays with the [ERC173] contract `owner()` (the artist). When LSP33 is carried by a different contract type (a profile, a vault, a custom contract), the ownership model is whatever that carrier defines — LSP33 only requires that the metadata is reachable via [ERC725Y].
 
 ## Motivation
 
-Music on-chain needs a way to describe releases, tracks, and collectibles with **provenance** (prove creation without selling), **industry compatibility** (DDEX, ISRC, ISWC, GRid for DSP interoperability), and **AI transparency** (DDEX ERN 4.3.2 disclosure fields). LSP33 provides a standardized metadata model without introducing a new token type — it composes [LSP4], [LSP7], and [LSP8].
+Music on-chain needs a way to describe releases and tracks with **provenance** (prove creation without selling), **industry compatibility** (DDEX, ISRC, ISWC, GRid for DSP interoperability), and **AI transparency** (DDEX ERN 4.3.2 disclosure fields).
+
+Existing LUKSO standards already cover digital identity ([LSP0], [LSP3]), generic asset metadata ([LSP4]), token contracts ([LSP7], [LSP8]), and structured ERC725Y storage ([LSP2]) — but none of them describe music specifically, and none should: tying a music schema to a particular token type would force every future carrier (a vault, a profile, a streaming-rights contract) to reimplement it.
+
+LSP33 fills the gap with a **carrier-neutral metadata schema**. The data lives wherever it makes sense; the schema stays the same.
 
 ## Specification
 
@@ -97,7 +101,7 @@ For LSP8 ↔ LSP7 entanglement (transparent metadata routing from a container to
 }
 ```
 
-MUST be set on any LSP33 contract — LSP8 release or LSP7 track.
+MUST be set on any [ERC725Y] contract that carries LSP33 metadata, regardless of carrier type (LSP7, LSP8, profile, vault, or any other ERC725Y contract).
 
 #### LSP33Metadata
 
@@ -124,7 +128,7 @@ Each key is typically a **separate JSON file**. They MAY be combined into a sing
 
 #### LSP4Metadata Attributes
 
-**Release level** (set on the LSP8 contract):
+**Release level** (any contract scope describing a whole release — typically the contract level of an LSP7 release token or LSP8 collection, but valid on any [ERC725Y] scope):
 
 | Attribute | Required | Description |
 | :--- | :---: | :--- |
@@ -137,7 +141,7 @@ Each key is typically a **separate JSON file**. They MAY be combined into a sing
 | `Secondary Genre` |  | Secondary genre |
 | `Language` |  | ISO 639-2 code |
 
-**Track level** (set on an LSP7 contract, or per-tokenId on an LSP8):
+**Track level** (any contract scope describing a single track — the contract level of an LSP7 track token, the per-tokenId scope of an LSP8 collection, or any other [ERC725Y] scope a carrier chooses):
 
 | Attribute | Required | Description |
 | :--- | :---: | :--- |
@@ -491,13 +495,13 @@ A release with tracks naturally produces **four separate files** — one `LSP4Me
 
 ## Rationale
 
-**Composition over new contracts.** LSP33 reuses [LSP4], [LSP7], and [LSP8]. Existing wallets, indexers, and marketplaces already understand these primitives.
+**Carrier-neutral.** LSP33 specifies *what* to store, not *where*. Any [ERC725Y] contract — token, profile, vault, or future contract type — can carry the schema by writing the data keys defined here. Tying the schema to a specific token type would force every new music-bearing contract to redefine it, fragmenting the ecosystem.
 
-**Artist vs collector separation.** Authorship lives in the LSP8 tokenId (or the LSP7 `owner()` when standalone); collectibility lives in LSP7 `balanceOf`. Units can change hands freely without ever touching metadata or minting.
+**Reuses existing primitives.** LSP33 builds on [LSP4] (so any LSP4-aware wallet or marketplace already understands the human-readable metadata) and on [LSP2]/[ERC725Y] (so the storage format is already standard). No new token contract is introduced.
 
 **Separate metadata files.** `LSP4Metadata` and `LSP33Metadata` are separate data keys so any LSP4-aware interface works out of the box and each can evolve independently. They may still be combined into a single file when desired.
 
-**Metadata only.** LSP33 deliberately does not specify linking or ownership mechanics. Those concerns are handled by [LSP35] (LSP8 ↔ LSP7 entanglement) and [LSP34] (minting rights delegation), keeping each standard focused and independently adoptable.
+**Metadata only.** LSP33 deliberately does not specify linking, ownership, or minting mechanics. Those concerns are handled by [LSP35] (LSP8 ↔ LSP7 entanglement) and [LSP34] (minting rights delegation), keeping each standard focused and independently adoptable. The artist-vs-collector separation that motivates LSP33's existence is enforced by those companion standards on the carriers that opt into them.
 
 ## Implementation
 
@@ -530,9 +534,12 @@ Copyright and related rights waived via [CC0](https://creativecommons.org/public
 
 [ERC173]: https://eips.ethereum.org/EIPS/eip-173
 [ERC725Y]: https://github.com/ERC725Alliance/ERC725/blob/develop/docs/ERC-725.md#erc725y
+[LSP0]: ./LSP-0-ERC725Account.md
 [LSP2]: ./LSP-2-ERC725YJSONSchema.md
+[LSP3]: ./LSP-3-Profile-Metadata.md
 [LSP4]: ./LSP-4-DigitalAsset-Metadata.md
 [LSP7]: ./LSP-7-DigitalAsset.md
 [LSP8]: ./LSP-8-IdentifiableDigitalAsset.md
+[LSP9]: ./LSP-9-Vault.md
 [LSP34]: ./LSP-34-ExternalOwnership.md
 [LSP35]: ./LSP-35-IdentifiableDigitalAssetEntanglement.md
